@@ -2,10 +2,15 @@ package errors
 
 import (
 	"fmt"
-	"runtime/debug"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/fatih/color"
+)
+
+const (
+	unknown = "unknown\n"
 )
 
 type logger func(format string, args ...interface{})
@@ -50,12 +55,45 @@ func Recover(handler logger) {
 
 	err := recover()
 	switch err.(type) {
+	case nil:
+		return
 	case *CustomError:
-		stack := string(debug.Stack())
+		stack := getStack()
 		handler("[Recovery] %s panic recovered:\n%+v\n%s",
 			time.Now().Format("2006/01/02 - 15:04:05"), err, stack)
 	default:
 		// 除了自定义的CustomError，其余的panic维持原状
 		panic(err)
 	}
+}
+
+func getStack() string {
+	const depth = 6 // 回溯最近6个函数栈信息
+	var pcs [depth]uintptr
+	var buf strings.Builder
+
+	n := runtime.Callers(3, pcs[:]) // skip = 3，跳过Recover的函数调用栈信息
+	// 获取文件名、函数所在行、函数名信息
+	for i := 0; i < n; i++ {
+		fn := runtime.FuncForPC(pcs[i])
+		if fn == nil {
+			buf.WriteString(unknown)
+			continue
+		}
+
+		filename, line := fn.FileLine(pcs[i])
+		funcname := getFuncname(fn.Name())
+		fmt.Fprintf(&buf, "%s:%d (0x%x)\n\t%s\n", filename, line, pcs[i], funcname)
+	}
+
+	return buf.String()
+}
+
+func getFuncname(name string) string {
+	// 不打印函数所在的文件的路径信息
+	index := strings.LastIndex(name, "/")
+	name = name[index+1:]
+	// 不打印包名
+	index = strings.Index(name, ".")
+	return name[index+1:]
 }
